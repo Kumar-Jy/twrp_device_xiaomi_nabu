@@ -12,7 +12,7 @@ env:
   MANIFEST_BRANCH: twrp-12.1
 
   DEVICE_TREE_URL: https://github.com/Kumar-Jy/twrp_device_xiaomi_nabu.git
-  DEVICE_TREE_BRANCH: mod-windows
+  DEVICE_TREE_BRANCH: test-build
   DEVICE_PATH: device/xiaomi/nabu
 
   DEVICE_NAME: nabu
@@ -43,7 +43,7 @@ jobs:
           imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar neofetch
 
     - name: Setup Java
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         distribution: 'zulu'
         java-version: '11'
