@@ -1,0 +1,69 @@
+#!/sbin/bash
+winpart=/dev/block/by-name/win
+esppart=/dev/block/by-name/esp
+linuxpart=/dev/block/by-name/linux
+userdata=/dev/block/by-name/userdata
+metadata=/dev/block/by-name/metadata
+cust=/dev/block/by-name/cust
+target=$1
+#force unmount and suppress errors
+force_umount() {
+    umount -lf "$1" 2>/dev/null || true
+}
+#format ESP only
+if [ "$target" = "esp" ]; then
+    [ -e "$esppart" ] || { echo "nothing to format huh. check your partitions"; exit 1; }
+    echo "Formatting ESP partition..."
+    force_umount "$esppart"
+    mkfs.fat -F32 -s1 "$esppart" -n ESPNABU
+    echo "ESP format done!"
+    exit 0
+fi
+#format WIN only
+if [ "$target" = "win" ]; then
+    [ -e "$winpart" ] || { echo "nothing to format huh. check your partitions"; exit 1; }
+    echo "Formatting WIN partition..."
+    force_umount "$winpart"
+    mkfs.ntfs -f "$winpart" -L WINNABU
+    echo "WIN format done!"
+    exit 0
+fi
+#format linux only
+if [ "$target" = "linux" ]; then
+    [ -e "$linuxpart" ] || { echo "nothing to format huh. check your partitions"; exit 1; }
+    echo "Formatting Linux partition..."
+    force_umount "$linuxpart"
+    mke2fs -t ext4 -F "$linuxpart"
+    echo "LINUX format done!"
+    exit 0
+fi
+#format userdata only
+if [ "$target" = "userdata" ]; then
+    [ -e "$userdata" ] || { echo "nothing to format huh. check your partitions"; exit 1; }
+    echo "Formatting userdata partition..."
+    force_umount "$userdata"
+    make_f2fs -f -g android "$userdata"
+    mke2fs -t ext4 "$metadata"
+    mke2fs -t ext4 "$cust"
+    echo "USERDATA format done!"
+    exit 0
+fi
+#format userdata only
+if [ "$target" = "userdata" ]; then
+    [ -e "$userdata" ] || { echo "nothing to format huh. check your partitions"; exit 1; }
+    echo "Formatting userdata partition..."
+    force_umount "$userdata"
+    make_f2fs -f -g android "$userdata"
+    mke2fs -t ext4 "$metadata"
+    mke2fs -t ext4 "$cust"
+    echo "USERDATA format done!"
+    exit 0
+fi
+
+#normally format both
+echo "Formatting ESP and WIN partitions..."
+force_umount "$esppart"
+force_umount "$winpart"
+mkfs.fat -F32 -s1 "$esppart" -n ESPNABU
+mkfs.ntfs -f "$winpart" -L WINNABU
+echo "Both partitions formatted successfully!"

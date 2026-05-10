@@ -1,0 +1,197 @@
+#!/sbin/bash
+. common
+
+# Configuration
+DISK="/dev/block/sda"
+ESP_START=10872
+ESP_END=11222
+MIN_WIN=30000
+MIN_LINUX=20000
+USERDATA_RESERVED=8000
+NEXT_PART=32
+
+# UI Helpers
+header() {
+    echo ""
+    echo "================================"
+    echo " $1"
+    echo "================================"
+}
+
+info() {
+    echo "[*] $1"
+}
+
+error() {
+    echo "[!] $1" >&2
+    exit 1
+}
+
+ask() {
+    printf "%s" "$1"
+}
+
+# Disk Information
+MAX_MB=$(($(blockdev --getsize64 "$DISK") / 1000000))
+
+[ -z "$MAX_MB" ] && error "Failed to detect disk size"
+
+AVAILABLE_MB=$((MAX_MB - ESP_END - USERDATA_RESERVED))
+
+# Size Parser
+parse_size() {
+    local input="$1"
+    local min="$2"
+    local name="$3"
+
+    input=$(echo "$input" \
+        | tr -d ' ' \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed 's/gib$//;s/gb$//;s/g$//')
+
+    echo "$input" | grep -q '^[0-9.]*$' \
+        || error "Invalid $name size format"
+
+    local mb
+    mb=$(echo "$input" | awk '{printf "%.0f", $1*1000}')
+
+    [ "$mb" -lt "$min" ] \
+        && error "$name must be at least $((min/1000)) GB"
+
+    [ "$mb" -gt "$AVAILABLE_MB" ] \
+        && error "$name exceeds available storage"
+
+    echo "$mb"
+}
+
+# Interactive Input
+header "Partition Setup"
+info "Available storage  : $((MAX_MB/1000)) GB"
+info "Free for partition : $((AVAILABLE_MB/1000)) GB"
+
+echo ""
+
+ask "Windows size in GB (skip if not required): "
+read WIN_INPUT
+
+ask "Linux size in GB (skip if not required): "
+read LINUX_INPUT
+
+[ -z "$WIN_INPUT" ] && [ -z "$LINUX_INPUT" ] \
+    && error "Nothing selected"
+
+# Process Sizes
+WIN_MB=0
+LINUX_MB=0
+
+if [ -n "$WIN_INPUT" ]; then
+    WIN_MB=$(parse_size "$WIN_INPUT" "$MIN_WIN" "Windows")
+    WIN_PART=$NEXT_PART
+    NEXT_PART=$((NEXT_PART + 1))
+fi
+
+if [ -n "$LINUX_INPUT" ]; then
+    LINUX_MB=$(parse_size "$LINUX_INPUT" "$MIN_LINUX" "Linux")
+    LINUX_PART=$NEXT_PART
+    NEXT_PART=$((NEXT_PART + 1))
+fi
+
+TOTAL_MB=$((WIN_MB + LINUX_MB))
+
+[ "$TOTAL_MB" -gt "$AVAILABLE_MB" ] \
+    && error "Combined size exceeds available storage"
+
+# Calculate Layout
+WIN_END=$((ESP_END + WIN_MB))
+LINUX_END=$((WIN_END + LINUX_MB))
+
+USERDATA_PART=$NEXT_PART
+
+# Preview Layout
+header "Partition Layout"
+
+echo "ESP        : 350 MB (sda31)"
+
+[ "$WIN_MB" -gt 0 ] \
+    && echo "Windows    : $((WIN_MB/1000)) GB (sda${WIN_PART})"
+
+[ "$LINUX_MB" -gt 0 ] \
+    && echo "Linux      : $((LINUX_MB/1000)) GB (sda${LINUX_PART})"
+
+echo "Userdata   : $(((MAX_MB - LINUX_END)/1000)) GB (sda${USERDATA_PART})"
+
+echo ""
+
+ask "Is this Correct? (y/n): "
+read CONFIRM
+
+case "$CONFIRM" in
+    y|Y) ;;
+    *) error "Cancelled ! lol rethink carefully.. " ;;
+esac
+
+# Create Partitions
+header "Creating Partitions"
+
+info "Removing old partitions"
+
+for i in 31 32 33 34 35; do
+    parted -s "$DISK" rm "$i" 2>/dev/null
+done
+
+info "Resizing GPT"
+
+sgdisk --resize-table 64 "$DISK"
+
+info "Creating ESP"
+
+parted -s "$DISK" \
+    mkpart esp fat32 ${ESP_START}MB ${ESP_END}MB
+
+parted -s "$DISK" set 31 esp on
+
+if [ "$WIN_MB" -gt 0 ]; then
+    info "Creating Windows partition"
+
+    parted -s "$DISK" \
+        mkpart win ntfs ${ESP_END}MB ${WIN_END}MB
+fi
+
+if [ "$LINUX_MB" -gt 0 ]; then
+    info "Creating Linux partition"
+
+    parted -s "$DISK" \
+        mkpart linux ext4 ${WIN_END}MB ${LINUX_END}MB
+fi
+
+info "Creating userdata partition"
+
+parted -s "$DISK" \
+    mkpart userdata ext4 ${LINUX_END}MB 100%
+
+sync
+
+# Formatting
+header "Formatting"
+
+mkfs.fat -F32 -s1 ${DISK}31 -n ESPNABU
+
+[ "$WIN_MB" -gt 0 ] \
+    && mkfs.ntfs -f ${DISK}${WIN_PART} -L WINNABU
+
+[ "$LINUX_MB" -gt 0 ] \
+    && mke2fs -t ext4 -F ${DISK}${LINUX_PART}
+
+make_f2fs -f -g android ${DISK}${USERDATA_PART}
+
+mke2fs -t ext4 -F /dev/block/by-name/metadata
+
+# Finalization
+header "Finalizing"
+
+fixgpt
+
+parted "$DISK" p free
+
+echo ""
+echo "Partitioning completed successfully!"

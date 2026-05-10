@@ -91,7 +91,7 @@ TARGET_SCREEN_WIDTH := 1600
 #RECOVERY_TOUCHSCREEN_FLIP_Y := true
 # ==================================================
 TW_THEME := portrait_hdpi
-TW_DEVICE_VERSION := 4 Mod Recovery by ArKT
+TW_DEVICE_VERSION := 4 Hybrid Recovery
 BOARD_HAS_NO_REAL_SDCARD := true
 RECOVERY_SDCARD_ON_DATA := true
 TARGET_RECOVERY_QCOM_RTC_FIX := true
