@@ -1,197 +1,109 @@
 #!/sbin/bash
 . common
 
-# Configuration
-DISK="/dev/block/sda"
+disk=/dev/block/sda
+max=$(($(blockdev --getsize64 $disk) / 1000000))
+[ -z "$max" ] && { echo "Failed to get disk size"; exit 1; }
+
 ESP_START=10872
 ESP_END=11222
-MIN_WIN=30000
-MIN_LINUX=20000
-USERDATA_RESERVED=8000
-NEXT_PART=32
+available_for_partition=$((max - ESP_END - 8000))  # Reserve 8GB for userdata
 
-# UI Helpers
-header() {
-    echo ""
-    echo "================================"
-    echo " $1"
-    echo "================================"
-}
-
-info() {
-    echo "[*] $1"
-}
-
-error() {
-    echo "[!] $1" >&2
-    exit 1
-}
-
-ask() {
-    printf "%s" "$1"
-}
-
-# Disk Information
-MAX_MB=$(($(blockdev --getsize64 "$DISK") / 1000000))
-
-[ -z "$MAX_MB" ] && error "Failed to detect disk size"
-
-AVAILABLE_MB=$((MAX_MB - ESP_END - USERDATA_RESERVED))
-
-# Size Parser
-parse_size() {
-    local input="$1"
-    local min="$2"
-    local name="$3"
-
-    input=$(echo "$input" \
-        | tr -d ' ' \
-        | tr '[:upper:]' '[:lower:]' \
-        | sed 's/gib$//;s/gb$//;s/g$//')
-
-    echo "$input" | grep -q '^[0-9.]*$' \
-        || error "Invalid $name size format"
-
-    local mb
+get_size() {
+    local input="$1" min="$2" name="$3"
+    input=$(echo "$input" | tr -d ' ' | tr '[:upper:]' '[:lower:]' | sed 's/gib$//;s/gb$//;s/g$//')
+    [ -z "$input" ] && { echo "ERROR: Invalid input format for $name" >&2; return 1; }
+    echo "$input" | grep -q '^[0-9.]*$' || { echo "ERROR: Invalid characters in $name input" >&2; return 1; }
     mb=$(echo "$input" | awk '{printf "%.0f", $1*1000}')
-
-    [ "$mb" -lt "$min" ] \
-        && error "$name must be at least $((min/1000)) GB"
-
-    [ "$mb" -gt "$AVAILABLE_MB" ] \
-        && error "$name exceeds available storage"
-
+    [ $mb -lt $min ] && { echo "ERROR: $name size ($((mb/1000)) GB) is below minimum ($((min/1000)) GB)" >&2; return 1; }
+    [ $mb -gt $available_for_partition ] && { echo "ERROR: $name size ($((mb/1000)) GB) exceeds maximum available size ($((available_for_partition/1000)) GB)" >&2; return 1; }
     echo "$mb"
 }
 
-# Interactive Input
-header "Partition Setup"
-info "Available storage  : $((MAX_MB/1000)) GB"
-info "Free for partition : $((AVAILABLE_MB/1000)) GB"
+next_part=32
 
-echo ""
+if [ $# -ge 2 ]; then
+    win_raw="$1"; linux_raw="$2"
+    [ $# -gt 2 ] && { win_raw="$1$2"; linux_raw="$3$4"; }
+    win_mb=$(get_size "$win_raw" 30000 "Windows") || exit 1
+    win_part=$next_part; next_part=$((next_part + 1))
+    linux_mb=$(get_size "$linux_raw" 20000 "Linux") || exit 1
+    linux_part=$next_part; next_part=$((next_part + 1))
+    [ $((win_mb + linux_mb)) -gt $available_for_partition ] && { echo "ERROR: Combined partition size exceeds available space" >&2; exit 1; }
 
-ask "Windows size in GB (skip if not required): "
-read WIN_INPUT
+elif [ $# -eq 1 ]; then
+    clean_display=$(echo "$1" | tr -d ' ' | sed 's/gib$//;s/gb$//;s/g$//' | tr '[:upper:]' '[:lower:]')
+    echo "You provided: $clean_display GB"
+    echo -n "Is this for (w)indows or (l)inux? [w/l]: "
+    read choice
+    case "${choice}" in
+        w|W|windows|Windows)
+            win_mb=$(get_size "$1" 30000 "Windows") || exit 1
+            win_part=$next_part; next_part=$((next_part + 1))
+            echo -n "Enter Linux size GB: "
+            read linux_input
+            [ -n "$linux_input" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
+            ;;
+        l|L|linux|Linux)
+            linux_mb=$(get_size "$1" 20000 "Linux") || exit 1
+            linux_part=$next_part; next_part=$((next_part + 1))
+            echo -n "Enter Windows size GB: "
+            read win_input
+            [ -n "$win_input" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
+            ;;
+        *) echo "ERROR: Invalid choice" >&2; exit 1 ;;
+    esac
+    [ -n "$win_mb" ] && [ -n "$linux_mb" ] && [ $((win_mb + linux_mb)) -gt $available_for_partition ] && { echo "ERROR: Combined partition size exceeds available space" >&2; exit 1; }
 
-ask "Linux size in GB (skip if not required): "
-read LINUX_INPUT
-
-[ -z "$WIN_INPUT" ] && [ -z "$LINUX_INPUT" ] \
-    && error "Nothing selected"
-
-# Process Sizes
-WIN_MB=0
-LINUX_MB=0
-
-if [ -n "$WIN_INPUT" ]; then
-    WIN_MB=$(parse_size "$WIN_INPUT" "$MIN_WIN" "Windows")
-    WIN_PART=$NEXT_PART
-    NEXT_PART=$((NEXT_PART + 1))
+else
+    echo -e "\n=== Type required partition size ==="
+    echo "Available disk space: $((max/1000)) GB"
+    echo "Maximum for each OS: $((available_for_partition/1000)) GB"
+    echo ""
+    echo -n "Enter Windows size GB (30-$((available_for_partition/1000))): "
+    read win_input
+    echo -n "Enter Linux size GB (20-$((available_for_partition/1000))): "
+    read linux_input
+    [ -z "$win_input" ] && [ -z "$linux_input" ] && { echo "ERROR: No input provided" >&2; exit 1; }
+    [ -n "$win_input" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
+    [ -n "$linux_input" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
+    [ -n "$win_mb" ] && [ -n "$linux_mb" ] && [ $((win_mb + linux_mb)) -gt $available_for_partition ] && { echo "ERROR: Combined partition size exceeds available space" >&2; exit 1; }
 fi
 
-if [ -n "$LINUX_INPUT" ]; then
-    LINUX_MB=$(parse_size "$LINUX_INPUT" "$MIN_LINUX" "Linux")
-    LINUX_PART=$NEXT_PART
-    NEXT_PART=$((NEXT_PART + 1))
-fi
+[ -z "$win_mb" ] && win_mb=0
+[ -z "$linux_mb" ] && linux_mb=0
+[ $win_mb -eq 0 ] && [ $linux_mb -eq 0 ] && { echo "ERROR: At least one partition required" >&2; exit 1; }
 
-TOTAL_MB=$((WIN_MB + LINUX_MB))
+win_end=$((ESP_END + win_mb))
+linux_end=$((win_end + linux_mb))
+userdata_part=$next_part
 
-[ "$TOTAL_MB" -gt "$AVAILABLE_MB" ] \
-    && error "Combined size exceeds available storage"
+echo -e "\n=== Partition Layout ==="
+echo "ESP:      350 MB (sda31)"
+[ $win_mb -gt 0 ] && echo "Windows:  $((win_mb/1000)) GB (sda${win_part})"
+[ $linux_mb -gt 0 ] && echo "Linux:    $((linux_mb/1000)) GB (sda${linux_part})"
+echo "Userdata: $(((max - linux_end)/1000)) GB (sda${userdata_part})"
 
-# Calculate Layout
-WIN_END=$((ESP_END + WIN_MB))
-LINUX_END=$((WIN_END + LINUX_MB))
+echo -n "Does this sound good (y/n)? "
+read yn
+case "$yn" in [Yy]*) ;; *) echo "Rethink things carefully..." >&2; exit 1;; esac
 
-USERDATA_PART=$NEXT_PART
-
-# Preview Layout
-header "Partition Layout"
-
-echo "ESP        : 350 MB (sda31)"
-
-[ "$WIN_MB" -gt 0 ] \
-    && echo "Windows    : $((WIN_MB/1000)) GB (sda${WIN_PART})"
-
-[ "$LINUX_MB" -gt 0 ] \
-    && echo "Linux      : $((LINUX_MB/1000)) GB (sda${LINUX_PART})"
-
-echo "Userdata   : $(((MAX_MB - LINUX_END)/1000)) GB (sda${USERDATA_PART})"
-
-echo ""
-
-ask "Is this Correct? (y/n): "
-read CONFIRM
-
-case "$CONFIRM" in
-    y|Y) ;;
-    *) error "Cancelled ! lol rethink carefully.. " ;;
-esac
-
-# Create Partitions
-header "Creating Partitions"
-
-info "Removing old partitions"
-
-for i in 31 32 33 34 35; do
-    parted -s "$DISK" rm "$i" 2>/dev/null
-done
-
-info "Resizing GPT"
-
-sgdisk --resize-table 64 "$DISK"
-
-info "Creating ESP"
-
-parted -s "$DISK" \
-    mkpart esp fat32 ${ESP_START}MB ${ESP_END}MB
-
-parted -s "$DISK" set 31 esp on
-
-if [ "$WIN_MB" -gt 0 ]; then
-    info "Creating Windows partition"
-
-    parted -s "$DISK" \
-        mkpart win ntfs ${ESP_END}MB ${WIN_END}MB
-fi
-
-if [ "$LINUX_MB" -gt 0 ]; then
-    info "Creating Linux partition"
-
-    parted -s "$DISK" \
-        mkpart linux ext4 ${WIN_END}MB ${LINUX_END}MB
-fi
-
-info "Creating userdata partition"
-
-parted -s "$DISK" \
-    mkpart userdata ext4 ${LINUX_END}MB 100%
-
+for i in 31 32 33 34 35; do parted -s $disk rm $i 2>/dev/null; done
+sgdisk --resize-table 64 $disk
+parted -s $disk mkpart esp fat32 ${ESP_START}MB ${ESP_END}MB
+parted -s $disk set 31 esp on
+[ $win_mb -gt 0 ] && parted -s $disk mkpart win ntfs ${ESP_END}MB ${win_end}MB
+[ $linux_mb -gt 0 ] && parted -s $disk mkpart linux ext4 ${win_end}MB ${linux_end}MB
+parted -s $disk mkpart userdata ext4 ${linux_end}MB 100%
 sync
 
-# Formatting
-header "Formatting"
-
-mkfs.fat -F32 -s1 ${DISK}31 -n ESPNABU
-
-[ "$WIN_MB" -gt 0 ] \
-    && mkfs.ntfs -f ${DISK}${WIN_PART} -L WINNABU
-
-[ "$LINUX_MB" -gt 0 ] \
-    && mke2fs -t ext4 -F ${DISK}${LINUX_PART}
-
-make_f2fs -f -g android ${DISK}${USERDATA_PART}
-
+echo -e "\n=== Formatting ==="
+mkfs.fat -F32 -s1 ${disk}31 -n ESPNABU
+[ $win_mb -gt 0 ] && mkfs.ntfs -f ${disk}${win_part} -L WINNABU
+[ $linux_mb -gt 0 ] && mke2fs -t ext4 -F ${disk}${linux_part}
+make_f2fs -f -g android ${disk}${userdata_part}
 mke2fs -t ext4 -F /dev/block/by-name/metadata
 
-# Finalization
-header "Finalizing"
-
 fixgpt
-
-parted "$DISK" p free
-
-echo ""
-echo "Partitioning completed successfully!"
+parted $disk p free
+echo "done!"
