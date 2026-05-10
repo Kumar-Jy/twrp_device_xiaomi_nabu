@@ -96,7 +96,7 @@ jobs:
     - name: Prepare Upload
       run: |
         OUT=arkt/out/target/product/${DEVICE_NAME}
-        IMG=V4-MODDED-TWRP-WINDOWS-$(date +'%d-%m').img
+        IMG=V4-HYBRID-TWRP-NABU-$(date +'%d-%m').img
         TEST_IMG=TEST_$IMG
         ARTIFACT_NAME=UNZIP_IT-${IMG%.img}
         mv "$OUT/boot.img" "$OUT/$IMG"
