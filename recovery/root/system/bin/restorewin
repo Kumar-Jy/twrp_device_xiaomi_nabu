@@ -24,5 +24,6 @@ echo "Required Size : $(awk "BEGIN {printf \"%.2f\", $requsize/1e9}") GB"
 umount -lf "$winpart" 2>/dev/null
 mkfs.ntfs -f -Q -q -L WINF1 "$winpart" || { echo "Failed to format $winpart as NTFS"; exit 1; }
 wimlib apply "$winimage" 1 "$winpart" || { echo "Failed to apply image to $winpart"; exit 1; }
+dd if=$backuppath/esp.img of=/dev/block/by-name/esp bs=64M 2>/dev/null
 
 echo "Restoration complete"

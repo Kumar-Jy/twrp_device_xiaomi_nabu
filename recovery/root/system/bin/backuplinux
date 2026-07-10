@@ -1,9 +1,9 @@
 #!/sbin/bash
 
-winpart=/dev/block/by-name/win
-defaultpath=/sdcard/winbackup
+linuxpart=/dev/block/by-name/linux
+defaultpath=/sdcard/linuxbackup
 
-printf "\n==== Windows Backup ====\n"
+printf "\n==== Linux Backup ====\n"
 printf "Default backup path: $defaultpath\n"
 printf "Enter custom path or press Enter to use default:\n> "
 read -r p
@@ -12,12 +12,21 @@ backuppath="${p:-$defaultpath}"
 mkdir -p "$backuppath" || { echo "Failed to create $backuppath"; exit 1; }
 touch "$backuppath/.test" && rm "$backuppath/.test" || { echo "Path not writable"; exit 1; }
 
-[ -e "$winpart" ] || { echo "Win partition missing"; exit 1; }
+[ -e "$linuxpart" ] || { echo "Linux partition not found at $linuxpart"; exit 1; }
 
-umount -f "$winpart" 2>/dev/null
-mkdir -p /win && mount.ntfs "$winpart" /win || { echo "Mount failed"; exit 1; }
+umount -f "$linuxpart" 2>/dev/null
+mkdir -p /linux
 
-requsize=$(df -k /win | awk 'NR==2 {printf "%d", $3*0.7}') || { echo "Failed to get Win usage"; exit 1; }
+fstype=$(blkid -s TYPE -o value "$linuxpart" 2>/dev/null)
+[ -z "$fstype" ] && fstype="ext4"
+echo "Detected filesystem: $fstype"
+
+mount -t "$fstype" "$linuxpart" /linux 2>/dev/null || {
+  echo "Failed to mount Linux partition as $fstype"
+  exit 1
+}
+
+requsize=$(df -k /linux | awk 'NR==2 {printf "%d", $3*0.7}') || { echo "Failed to get usage"; exit 1; }
 avaisize=$(df -k "$backuppath" | awk 'NR==2 {print $4}') || { echo "Failed to get available space"; exit 1; }
 
 echo "Required Size : $(awk "BEGIN {printf \"%.2f\", $requsize/1e6}") GB"
@@ -25,7 +34,11 @@ echo "Avalable size : $(awk "BEGIN {printf \"%.2f\", $avaisize/1e6}") GB"
 
 [ "$avaisize" -gt "$requsize" ] || { echo "Not enough free space"; exit 1; }
 
-echo "Backing up Win..."
-wimlib capture "$winpart" "$backuppath/winbackup.wim" || exit 1
+echo "Backing up Linux..."
+echo "$fstype" > "$backuppath/linux.fstype"
+tar czf "$backuppath/linuxbackup.tar.gz" -C /linux . || exit 1
 dd if=/dev/block/by-name/esp of=$backuppath/esp.img bs=64M 2>/dev/null
+
+umount /linux 2>/dev/null
+
 echo "Backup complete to $backuppath"
