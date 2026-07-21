@@ -8,7 +8,6 @@ max=$(($(blockdev --getsize64 $disk) / 1000000))
 ESP_START=10872
 ESP_END=11222
 available_for_partition=$((max - ESP_END - 8000))  # Reserve 8GB for userdata
-max_gb=$((available_for_partition/1000))
 
 get_size() {
     local input="$1" min="$2" name="$3"
@@ -35,45 +34,39 @@ if [ $# -ge 2 ]; then
 elif [ $# -eq 1 ]; then
     clean_display=$(echo "$1" | tr -d ' ' | sed 's/gib$//;s/gb$//;s/g$//' | tr '[:upper:]' '[:lower:]')
     echo "You provided: $clean_display GB"
-    echo -n "Is this size to (W)indows or (L)inux? [w/l]: "
+    echo -n "Is this for (w)indows or (l)inux? [w/l]: "
     read choice
     case "${choice}" in
         w|W|windows|Windows)
             win_mb=$(get_size "$1" 30000 "Windows") || exit 1
             win_part=$next_part; next_part=$((next_part + 1))
-            echo ""
-            echo "Want to add Linux partition too?"
-            echo -n "Enter Linux size in GB, or 0 to skip: "
+            echo -n "Enter Linux size GB: "
             read linux_input
-            [ -n "$linux_input" ] && [ "$linux_input" != "0" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
+            [ -n "$linux_input" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
             ;;
         l|L|linux|Linux)
             linux_mb=$(get_size "$1" 20000 "Linux") || exit 1
             linux_part=$next_part; next_part=$((next_part + 1))
-            echo ""
-            echo "Want to add Windows partition too?"
-            echo -n "Enter Windows size in GB, or 0 to skip: "
+            echo -n "Enter Windows size GB: "
             read win_input
-            [ -n "$win_input" ] && [ "$win_input" != "0" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
+            [ -n "$win_input" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
             ;;
         *) echo "ERROR: Invalid choice" >&2; exit 1 ;;
     esac
     [ -n "$win_mb" ] && [ -n "$linux_mb" ] && [ $((win_mb + linux_mb)) -gt $available_for_partition ] && { echo "ERROR: Combined partition size exceeds available space" >&2; exit 1; }
 
 else
-    echo -e "\n=== Create Windows and/or Linux dual boot partitions ==="
-    echo "Available space:        $((max/1000)) GB"
-    echo "Maximum for each OS:     ${max_gb} GB"
+    echo -e "\n=== Type required partition size ==="
+    echo "Available disk space: $((max/1000)) GB"
+    echo "Maximum for each OS: $((available_for_partition/1000)) GB"
     echo ""
-    echo "Enter the size for each OS or Enter 0 to skip any one."
-    echo ""
-    echo -n "Windows size in GB (min 30, max $max_gb): "
+    echo -n "Enter Windows size GB (30-$((available_for_partition/1000))): "
     read win_input
-    echo -n "Enter Linux size in GB (min 20, max $max_gb): "
+    echo -n "Enter Linux size GB (20-$((available_for_partition/1000))): "
     read linux_input
     [ -z "$win_input" ] && [ -z "$linux_input" ] && { echo "ERROR: No input provided" >&2; exit 1; }
-    [ -n "$win_input" ] && [ "$win_input" != "0" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
-    [ -n "$linux_input" ] && [ "$linux_input" != "0" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
+    [ -n "$win_input" ] && { win_mb=$(get_size "$win_input" 30000 "Windows") || exit 1; win_part=$next_part; next_part=$((next_part + 1)); }
+    [ -n "$linux_input" ] && { linux_mb=$(get_size "$linux_input" 20000 "Linux") || exit 1; linux_part=$next_part; next_part=$((next_part + 1)); }
     [ -n "$win_mb" ] && [ -n "$linux_mb" ] && [ $((win_mb + linux_mb)) -gt $available_for_partition ] && { echo "ERROR: Combined partition size exceeds available space" >&2; exit 1; }
 fi
 
@@ -86,15 +79,14 @@ linux_end=$((win_end + linux_mb))
 userdata_part=$next_part
 
 echo -e "\n=== Partition Layout ==="
-echo "ESP:      350 MB        (sda31)"
-[ $win_mb -gt 0 ] && echo "Windows:  $((win_mb/1000)) GB        (sda${win_part})"
-[ $linux_mb -gt 0 ] && echo "Linux:    $((linux_mb/1000)) GB        (sda${linux_part})"
-echo "Userdata: $(((max - linux_end)/1000)) GB        (sda${userdata_part})"
+echo "ESP:      350 MB (sda31)"
+[ $win_mb -gt 0 ] && echo "Windows:  $((win_mb/1000)) GB (sda${win_part})"
+[ $linux_mb -gt 0 ] && echo "Linux:    $((linux_mb/1000)) GB (sda${linux_part})"
+echo "Userdata: $(((max - linux_end)/1000)) GB (sda${userdata_part})"
 
-echo ""
-echo -n "Proceed with this layout? (y/n): "
+echo -n "Does this sound good (y/n)? "
 read yn
-case "$yn" in [Yy]*) ;; *) echo "Aborted. No changes made." >&2; exit 1;; esac
+case "$yn" in [Yy]*) ;; *) echo "Rethink things carefully..." >&2; exit 1;; esac
 
 for i in 31 32 33 34 35; do parted -s $disk rm $i 2>/dev/null; done
 sgdisk --resize-table 64 $disk
