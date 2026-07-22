@@ -27,4 +27,5 @@ echo "Avalable size : $(awk "BEGIN {printf \"%.2f\", $avaisize/1e6}") GB"
 
 echo "Backing up Win..."
 wimlib capture "$winpart" "$backuppath/winbackup.wim" || exit 1
+dd if=/dev/block/by-name/esp of=$backuppath/esp.img bs=64M 2>/dev/null
 echo "Backup complete to $backuppath"
