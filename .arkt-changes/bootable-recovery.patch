@@ -582,9 +582,6 @@ diff -ruN '--exclude=.git' /bootable/recovery/twrp-functions.cpp /bootable/recov
 +    Exec_Cmd("[ -f /ramdisk-files-arkt.txt ] && mv /ramdisk-files-arkt.txt /ramdisk-files.txt");
 +    Exec_Cmd("[ -f /ramdisk-files-arkt-1.txt ] && mv /ramdisk-files-arkt-1.txt /ramdisk-files-arkt.txt");
 +
-+    // Regenerate ramdisk-files.txt to match actual post-rotation file layout
-+    Exec_Cmd("cd / && find . | sed \"s/^.\\///\" | sed \"/lib\\/modules\\//d\" > /ramdisk-files.txt");
-+
 +    LOGINFO("Unmounting and reinitializing...\n");
 +    sync();
 +    DataManager::Flush();
