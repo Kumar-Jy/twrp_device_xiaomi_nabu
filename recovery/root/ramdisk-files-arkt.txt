@@ -208,7 +208,6 @@ twres/images/indeterminate001.png
 twres/images/indeterminate012.png
 twres/images/shift_terminal.png
 twres/images/shift.png
-twres/images/win.png
 twres/images/kb_arrow_up.png
 twres/images/slider_used.png
 twres/images/checkbox_true.png
