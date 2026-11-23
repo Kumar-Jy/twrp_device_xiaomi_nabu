@@ -29,13 +29,15 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v6
 
-    - name: Clean Workspace
-      uses: rokibhasansagar/slimhub_actions@main
+    - name: Clean Workspace & Free Disk Space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+        sudo docker image prune -a -f || true
 
     - name: Install Dependencies
       run: |
-        sudo apt update && sudo apt upgrade -y
-        DEBIAN_FRONTEND=noninteractive sudo apt install -y \
+        sudo apt update
+        DEBIAN_FRONTEND=noninteractive sudo apt install -y --no-install-recommends \
           gperf gcc-multilib g++-multilib gcc-10-multilib g++-10-multilib \
           libc6-dev lib32ncurses-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils \
           xsltproc bc ccache liblz4-tool libncurses-dev libsdl1.2-dev \
@@ -69,12 +71,20 @@ jobs:
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR_ID}+${GITHUB_ACTOR}@users.noreply.github.com"
         repo init --depth=1 -u "$MANIFEST_URL" -b "$MANIFEST_BRANCH"
-        repo sync -j$(nproc --all) --force-sync
+        repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
     - name: Clone Device Tree
       run: |
         git clone "$DEVICE_TREE_URL" -b "$DEVICE_TREE_BRANCH" "$DEVICE_PATH"
       working-directory: arkt
+
+    - name: Setup CCache
+      uses: actions/cache@v4
+      with:
+        path: ~/.ccache
+        key: twrp-ccache-${{ env.DEVICE_NAME }}-${{ github.sha }}
+        restore-keys: |
+          twrp-ccache-${{ env.DEVICE_NAME }}-
 
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
@@ -84,13 +94,18 @@ jobs:
     - name: Build V4 Modded TWRP Recovery
       run: |
         neofetch
+        export USE_CCACHE=1
+        export CCACHE_DIR="$HOME/.ccache"
+        export CCACHE_EXEC=/usr/bin/ccache
+        ccache -M 8G
+        ccache -z
         patch -p1 < "$DEVICE_PATH/.arkt-changes/bootable-recovery.patch"
         patch -p1 < "$DEVICE_PATH/.arkt-changes/build-make.patch"
         bash device/xiaomi/nabu/.arkt-changes/deleted_files.sh  
         source build/envsetup.sh
         lunch "${MAKEFILE_NAME}-eng"
-        make clean || rm -rf out
         make bootimage -j$(nproc --all)
+        ccache -s
       working-directory: arkt
 
     - name: Prepare Upload
