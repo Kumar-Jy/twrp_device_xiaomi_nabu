@@ -89,7 +89,7 @@ jobs:
         bash device/xiaomi/nabu/.arkt-changes/deleted_files.sh  
         source build/envsetup.sh
         lunch "${MAKEFILE_NAME}-eng"
-        make clean
+        make clean || rm -rf out
         make bootimage -j$(nproc --all)
       working-directory: arkt
 
